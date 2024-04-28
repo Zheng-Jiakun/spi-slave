@@ -2,9 +2,9 @@
 // Description: SPI (Serial Peripheral Interface) Slave
 //              Creates slave based on input configuration.
 //              Receives a byte one bit at a time on MOSI
-//              Will also push out byte data one bit at a time on MISO.  
+//              Will also push out byte data one bit at a time on MISO.
 //              Any data on input byte will be shipped out on MISO.
-//              Supports multiple bytes per transaction when CS_n is kept 
+//              Supports multiple bytes per transaction when CS_n is kept
 //              low during the transaction.
 //
 // Note:        i_Clk must be at least 4x faster than i_SPI_Clk
@@ -34,7 +34,7 @@ module SPI_Slave
 
    // SPI Interface
    input      i_SPI_Clk,
-   output reg o_SPI_MISO,
+   output     o_SPI_MISO,
    input      i_SPI_MOSI,
    input      i_SPI_CS_n        // active low
    );
@@ -45,7 +45,7 @@ module SPI_Slave
   wire w_CPHA;     // Clock phase
   wire w_SPI_Clk;  // Inverted/non-inverted depending on settings
   wire w_SPI_MISO_Mux;
-  
+
   reg [2:0] r_RX_Bit_Count;
   reg [2:0] r_TX_Bit_Count;
   reg [7:0] r_Temp_RX_Byte;
@@ -57,7 +57,7 @@ module SPI_Slave
   // CPOL: Clock Polarity
   // CPOL=0 means clock idles at 0, leading edge is rising edge.
   // CPOL=1 means clock idles at 1, leading edge is falling edge.
-  assign w_CPOL  = (SPI_MODE == 2) | (SPI_MODE == 3);
+  assign w_CPOL  = (SPI_MODE == 2) | (SPI_MODE == 3);   // TODO
 
   // CPHA: Clock Phase
   // CPHA=0 means the "out" side changes the data on trailing edge of clock
@@ -66,7 +66,7 @@ module SPI_Slave
   //              the "in" side captures data on the trailing edge of clock
   assign w_CPHA  = (SPI_MODE == 1) | (SPI_MODE == 3);
 
-  assign w_SPI_Clk = w_CPHA ? ~i_SPI_Clk : i_SPI_Clk;
+  assign w_SPI_Clk = ((!w_CPOL & w_CPHA) | (w_CPOL & !w_CPHA)) ? ~i_SPI_Clk : i_SPI_Clk;
 
 
 
@@ -76,16 +76,18 @@ module SPI_Slave
   begin
     if (i_SPI_CS_n)
     begin
-      r_RX_Bit_Count <= 0;
+      r_RX_Bit_Count <= 3'd0;
       r_RX_Done      <= 1'b0;
+      r_Temp_RX_Byte <= 8'h00;
+      r_RX_Byte      <= 8'h00;
     end
     else
     begin
-      r_RX_Bit_Count <= r_RX_Bit_Count + 1;
+      r_RX_Bit_Count <= r_RX_Bit_Count + 3'd1;
 
       // Receive in LSB, shift up to MSB
       r_Temp_RX_Byte <= {r_Temp_RX_Byte[6:0], i_SPI_MOSI};
-    
+
       if (r_RX_Bit_Count == 3'b111)
       begin
         r_RX_Done <= 1'b1;
@@ -93,7 +95,7 @@ module SPI_Slave
       end
       else if (r_RX_Bit_Count == 3'b010)
       begin
-        r_RX_Done <= 1'b0;        
+        r_RX_Done <= 1'b0;
       end
 
     end // else: !if(i_SPI_CS_n)
@@ -115,7 +117,7 @@ module SPI_Slave
     else
     begin
       // Here is where clock domains are crossed.
-      // This will require timing constraint created, can set up long path.
+      // This will require timing constraint created, can set up long path.   (Jack: SPI clk needs to be slow enough)
       r2_RX_Done <= r_RX_Done;
 
       r3_RX_Done <= r2_RX_Done;
@@ -148,7 +150,7 @@ module SPI_Slave
   end
 
 
-  // Purpose: Transmits 1 SPI Byte whenever SPI clock is toggling
+  // Purpose: Transmits 1 SPI Byte whenever SPI clock is toggling (Jack: PREPARE data on the same edge as RX)
   // Will transmit read data back to SW over MISO line.
   // Want to put data on the line immediately when CS goes low.
   always @(posedge w_SPI_Clk or posedge i_SPI_CS_n)
@@ -160,7 +162,7 @@ module SPI_Slave
     end
     else
     begin
-      r_TX_Bit_Count <= r_TX_Bit_Count - 1;
+      r_TX_Bit_Count <= r_TX_Bit_Count - 3'd1;
 
       // Here is where data crosses clock domains from i_Clk to w_SPI_Clk
       // Can set up a timing constraint with wide margin for data path.
@@ -170,7 +172,7 @@ module SPI_Slave
   end // always @ (negedge w_SPI_Clk or posedge i_SPI_CS_n_SW)
 
 
-  // Purpose: Register TX Byte when DV pulse comes.  Keeps registed byte in 
+  // Purpose: Register TX Byte when DV pulse comes.  Keeps registed byte in
   // this module to get serialized and sent back to master.
   always @(posedge i_Clk or negedge i_Rst_L)
   begin
@@ -182,7 +184,7 @@ module SPI_Slave
     begin
       if (i_TX_DV)
       begin
-        r_TX_Byte <= i_TX_Byte; 
+        r_TX_Byte <= i_TX_Byte;
       end
     end // else: !if(~i_Rst_L)
   end // always @ (posedge i_Clk or negedge i_Rst_L)
